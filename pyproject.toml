@@ -9,3 +9,13 @@ dependencies = [
     "xrpl-py>=4.4.0",
     "textual>=0.89.0",
 ]
+
+[project.optional-dependencies]
+test = [
+    "behave>=1.2.6",
+    "textual-dev>=1.7.0",
+]
+
+[tool.behave]
+paths = ["tests/features"]
+format = ["pretty"]

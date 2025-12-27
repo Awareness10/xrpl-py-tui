@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any
+from typing import Any, AsyncIterator
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -13,7 +14,8 @@ from textual.reactive import reactive
 from textual.widgets import Header, Footer, Static
 from textual.worker import Worker, get_current_worker
 
-from xrpl.wallet import Wallet, generate_faucet_wallet
+from xrpl.wallet import Wallet
+from xrpl.asyncio.wallet import generate_faucet_wallet
 from xrpl.asyncio.clients import AsyncWebsocketClient
 from xrpl.asyncio.account import get_balance
 from xrpl.models import Subscribe, StreamParameter, Payment
@@ -63,6 +65,20 @@ class XRPLDashboard(App):
         self.connection = XRPLConnectionManager()
         self.subscriptions = SubscriptionManager(self.connection)
         self._ws_client: AsyncWebsocketClient | None = None
+        self._ws_lock = asyncio.Lock()  # Protects _ws_client access
+
+    @asynccontextmanager
+    async def _get_client(self) -> AsyncIterator[AsyncWebsocketClient]:
+        """
+        Context manager for safe WebSocket client access.
+
+        Acquires lock and validates client is connected before yielding.
+        Raises RuntimeError if client is not available.
+        """
+        async with self._ws_lock:
+            if self._ws_client is None or not self._ws_client.is_open():
+                raise RuntimeError("Not connected to XRPL")
+            yield self._ws_client
 
     def compose(self) -> ComposeResult:
         """Compose the application layout."""
@@ -101,7 +117,10 @@ class XRPLDashboard(App):
                 async with AsyncWebsocketClient(
                     "wss://s.altnet.rippletest.net:51233"
                 ) as client:
-                    self._ws_client = client
+                    # Set client under lock
+                    async with self._ws_lock:
+                        self._ws_client = client
+
                     self.connection_status = "connected"
                     self.post_message(ConnectionStateChanged("connected"))
 
@@ -121,8 +140,10 @@ class XRPLDashboard(App):
                 )
                 # Wait before reconnecting
                 await asyncio.sleep(2)
-
-            self._ws_client = None
+            finally:
+                # Clear client under lock
+                async with self._ws_lock:
+                    self._ws_client = None
 
     async def _handle_ws_message(self, message: dict[str, Any]) -> None:
         """Handle incoming WebSocket messages."""
@@ -203,18 +224,19 @@ class XRPLDashboard(App):
 
     async def _refresh_account_balances(self) -> None:
         """Refresh balances for all tracked accounts."""
-        if not self._ws_client or not self._ws_client.is_open():
-            return
-
-        for address in self.store.account_addresses:
-            try:
-                balance_drops = await get_balance(address, self._ws_client)
-                balance = XRP.from_drops(int(balance_drops))
-                prev_balance = self.store.accounts[address].balance if address in self.store.accounts else None
-                self.store.update_account_balance(address, balance)
-                self.post_message(AccountUpdated(address, balance, prev_balance))
-            except Exception:
-                pass  # Account might not exist yet
+        try:
+            async with self._get_client() as client:
+                for address in list(self.store.account_addresses):
+                    try:
+                        balance_drops = await get_balance(address, client)
+                        balance = XRP.from_drops(int(balance_drops))
+                        prev_balance = self.store.accounts[address].balance if address in self.store.accounts else None
+                        self.store.update_account_balance(address, balance)
+                        self.post_message(AccountUpdated(address, balance, prev_balance))
+                    except Exception:
+                        pass  # Account might not exist yet
+        except RuntimeError:
+            pass  # Not connected
 
     async def action_refresh(self) -> None:
         """Refresh all account balances."""
@@ -223,34 +245,38 @@ class XRPLDashboard(App):
 
     async def action_faucet_wallet(self) -> None:
         """Generate a new wallet from testnet faucet."""
+        self.run_worker(self._create_faucet_wallet(), exclusive=False, name="faucet_wallet")
 
-        async def create_wallet() -> None:
-            if not self._ws_client or not self._ws_client.is_open():
-                self.notify("Not connected to XRPL", severity="error")
-                return
+    async def _create_faucet_wallet(self) -> None:
+        """Worker coroutine to create a faucet wallet."""
+        self.notify("Generating wallet from faucet...")
 
-            self.notify("Generating wallet from faucet...")
-            try:
-                wallet = await generate_faucet_wallet(self._ws_client, debug=False)
+        try:
+            # Acquire lock for the entire wallet creation process
+            async with self._get_client() as client:
+                # Generate wallet from faucet
+                wallet = await generate_faucet_wallet(client, debug=False)
+
+                # Add wallet to store first (creates account entry too)
                 self.store.add_wallet(wallet, WalletSource.FAUCET)
 
-                # Subscribe to account updates
-                await self._ws_client.send(Subscribe(accounts=[wallet.address]))
+                # Subscribe to account updates for this wallet
+                await client.send(Subscribe(accounts=[wallet.address]))
 
                 # Get initial balance
-                balance_drops = await get_balance(wallet.address, self._ws_client)
+                balance_drops = await get_balance(wallet.address, client)
                 balance = XRP.from_drops(int(balance_drops))
                 self.store.update_account_balance(wallet.address, balance)
 
-                self.post_message(
-                    WalletCreated(wallet.address, "faucet")
-                )
-                self.post_message(AccountUpdated(wallet.address, balance))
-                self.notify(f"Wallet created: {wallet.address[:8]}...")
-            except Exception as e:
-                self.notify(f"Failed to create wallet: {e}", severity="error")
+            # Post messages outside the lock to avoid blocking
+            self.post_message(WalletCreated(wallet.address, "faucet"))
+            self.post_message(AccountUpdated(wallet.address, balance))
+            self.notify(f"Wallet created: {wallet.address[:8]}...")
 
-        self.run_worker(create_wallet(), exclusive=False, name="faucet_wallet")
+        except RuntimeError as e:
+            self.notify(f"Not connected to XRPL: {e}", severity="error")
+        except Exception as e:
+            self.notify(f"Failed to create wallet: {e}", severity="error")
 
     def action_import_wallet(self) -> None:
         """Show wallet import modal."""
@@ -261,22 +287,28 @@ class XRPLDashboard(App):
         if wallet is None:
             return
 
+        # Add wallet to store first
         self.store.add_wallet(wallet, WalletSource.IMPORTED)
+        balance: XRP | None = None
 
-        if self._ws_client and self._ws_client.is_open():
-            # Subscribe to account updates
-            await self._ws_client.send(Subscribe(accounts=[wallet.address]))
+        try:
+            async with self._get_client() as client:
+                # Subscribe to account updates
+                await client.send(Subscribe(accounts=[wallet.address]))
 
-            # Get initial balance
-            try:
-                balance_drops = await get_balance(wallet.address, self._ws_client)
+                # Get initial balance
+                balance_drops = await get_balance(wallet.address, client)
                 balance = XRP.from_drops(int(balance_drops))
                 self.store.update_account_balance(wallet.address, balance)
-                self.post_message(AccountUpdated(wallet.address, balance))
-            except Exception:
-                pass
+        except RuntimeError:
+            pass  # Not connected, wallet still added locally
+        except Exception:
+            pass  # Balance fetch failed, wallet still added
 
+        # Always post messages to update UI
         self.post_message(WalletCreated(wallet.address, "imported"))
+        if balance is not None:
+            self.post_message(AccountUpdated(wallet.address, balance))
         self.notify(f"Wallet imported: {wallet.address[:8]}...")
 
     def action_new_transaction(self) -> None:
@@ -303,34 +335,38 @@ class XRPLDashboard(App):
             self.notify("Source wallet not found", severity="error")
             return
 
-        async def submit_payment() -> None:
-            if not self._ws_client or not self._ws_client.is_open():
-                self.notify("Not connected", severity="error")
-                return
+        self.run_worker(
+            self._submit_payment(wallet_info, destination, amount),
+            exclusive=False,
+            name="submit_payment",
+        )
 
-            self.notify(f"Submitting payment of {amount.format_xrp(False)}...")
+    async def _submit_payment(
+        self, wallet_info: WalletInfo, destination: str, amount: XRP
+    ) -> None:
+        """Worker coroutine to submit a payment transaction."""
+        self.notify(f"Submitting payment of {amount.format_xrp(False)}...")
 
-            try:
+        try:
+            async with self._get_client() as client:
                 payment = Payment(
-                    account=source_address,
+                    account=wallet_info.address,
                     amount=str(amount.drops),
                     destination=destination,
                 )
 
-                response = await submit_and_wait(
-                    payment, self._ws_client, wallet_info.wallet
-                )
+                response = await submit_and_wait(payment, client, wallet_info.wallet)
 
                 tx_hash = response.result.get("hash", "")
                 self.notify(f"Payment validated: {tx_hash[:8]}...", severity="information")
 
-                # Refresh balances
-                await self._refresh_account_balances()
+            # Refresh balances outside the lock
+            await self._refresh_account_balances()
 
-            except Exception as e:
-                self.notify(f"Payment failed: {e}", severity="error")
-
-        self.run_worker(submit_payment(), exclusive=False, name="submit_payment")
+        except RuntimeError as e:
+            self.notify(f"Not connected: {e}", severity="error")
+        except Exception as e:
+            self.notify(f"Payment failed: {e}", severity="error")
 
     def action_toggle_dark(self) -> None:
         """Toggle dark mode."""
