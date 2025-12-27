@@ -1,5 +1,11 @@
+"""XRPL TUI Dashboard - Main entry point."""
+
+from app import run
+
+
 def main():
-    print("Hello from xrp-tui!")
+    """Launch the XRPL Dashboard application."""
+    run()
 
 
 if __name__ == "__main__":

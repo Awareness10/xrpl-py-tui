@@ -10,7 +10,7 @@ from rich.table import Table
 from rich.status import Status
 from rich import box
 
-from xrp_amount import XRP
+from utils.xrp_amount import XRP
 
 console = Console()
 print = console.print  # Override built-in print with rich console.print

@@ -16,7 +16,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from datetime import datetime
 import time
 
-from xrp_amount import XRP
+from utils.xrp_amount import XRP
 
 console = Console()
 
