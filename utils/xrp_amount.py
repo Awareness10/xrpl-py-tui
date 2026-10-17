@@ -47,19 +47,20 @@ class XRP:
         """Get the amount in drops."""
         return self._drops
 
-    def format_xrp(self, show_drops: bool = True) -> str:
+    def format_xrp(self, show_drops: bool = True, decimals: int = 2) -> str:
         """
         Format as XRP with optional drops in parentheses.
 
         Args:
             show_drops: If True, show drops in parentheses
+            decimals: Number of decimal places to show (default 2)
 
         Returns:
-            Formatted string like "100.5 XRP (100500000 drops)"
+            Formatted string like "100.50 XRP (100500000 drops)"
         """
         if show_drops:
-            return f"{self.xrp:.6f} XRP ({self.drops} drops)"
-        return f"{self.xrp:.6f} XRP"
+            return f"{self.xrp:.{decimals}f} XRP ({self.drops} drops)"
+        return f"{self.xrp:.{decimals}f} XRP"
 
     def format_drops(self, show_xrp: bool = True) -> str:
         """

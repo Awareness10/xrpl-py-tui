@@ -3,11 +3,10 @@ name = "xrp-tui"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14.7"
 dependencies = [
-    "rich>=14.2.0",
     "xrpl-py>=4.4.0",
-    "textual>=0.89.0",
+    "rustual-py[rich]>=0.5.1",
 ]
 
 [project.optional-dependencies]

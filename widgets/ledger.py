@@ -7,11 +7,43 @@ from textual.containers import Horizontal
 from textual.reactive import reactive
 from textual.widgets import Static
 
-from messages import LedgerClosed, ConnectionStateChanged
-
 
 class LedgerWidget(Static):
-    """Widget displaying current ledger and connection status."""
+    """Widget displaying current ledger and connection status.
+
+    Uses data_bind() to sync reactive attributes from parent App.
+    """
+
+    DEFAULT_CSS = """
+    LedgerWidget {
+        height: auto;
+        width: 100%;
+        padding: 0 2;
+        border: solid $primary;
+        background: $surface;
+    }
+
+    LedgerWidget #ledger-content {
+        height: 1;
+        width: 100%;
+        align: left middle;
+    }
+
+    LedgerWidget #connection-status {
+        width: auto;
+        min-width: 16;
+        text-style: bold;
+    }
+
+    LedgerWidget #ledger-info {
+        width: auto;
+        min-width: 24;
+    }
+
+    LedgerWidget #ledger-time {
+        width: 1fr;
+    }
+    """
 
     connection_status = reactive("disconnected")
     current_ledger = reactive(0)
@@ -19,7 +51,6 @@ class LedgerWidget(Static):
     txn_count = reactive(0)
 
     def compose(self) -> ComposeResult:
-        """Compose the widget layout."""
         yield Horizontal(
             Static("", id="connection-status"),
             Static("", id="ledger-info"),
@@ -28,60 +59,44 @@ class LedgerWidget(Static):
         )
 
     def on_mount(self) -> None:
-        """Initialize the widget on mount."""
         self._update_display()
 
-    def watch_connection_status(self, status: str) -> None:
-        """React to connection status changes."""
+    def watch_connection_status(self) -> None:
         self._update_display()
 
-    def watch_current_ledger(self, ledger: int) -> None:
-        """React to ledger changes."""
+    def watch_current_ledger(self) -> None:
         self._update_display()
 
-    def watch_ledger_time(self, time: str) -> None:
-        """React to ledger time changes."""
+    def watch_ledger_time(self) -> None:
+        self._update_display()
+
+    def watch_txn_count(self) -> None:
         self._update_display()
 
     def _update_display(self) -> None:
         """Update the display with current values."""
-        # Connection status
-        status_widget = self.query_one("#connection-status", Static)
-        status = self.connection_status.upper()
-        status_class = f"status-{self.connection_status}"
-
-        if self.connection_status == "connected":
-            status_icon = "[green]●[/green]"
-        elif self.connection_status == "connecting":
-            status_icon = "[yellow]◐[/yellow]"
-        elif self.connection_status == "reconnecting":
-            status_icon = "[yellow]↻[/yellow]"
-        else:
-            status_icon = "[red]○[/red]"
-
-        status_widget.update(f" {status_icon} {status} ")
+        # Connection status with theme colors
+        icons = {
+            "connected": "[#22c55e]●[/]",
+            "connecting": "[#eab308]◐[/]",
+            "reconnecting": "[#eab308]↻[/]",
+            "disconnected": "[#ef4444]○[/]",
+        }
+        icon = icons.get(self.connection_status, "[dim]?[/]")
+        self.query_one("#connection-status", Static).update(
+            f" {icon} {self.connection_status.upper()} "
+        )
 
         # Ledger info
-        ledger_widget = self.query_one("#ledger-info", Static)
         if self.current_ledger > 0:
-            ledger_widget.update(f" Ledger: [bold cyan]{self.current_ledger:,}[/bold cyan] ")
+            ledger_text = f" Ledger: [bold #a855f7]{self.current_ledger:,}[/] "
         else:
-            ledger_widget.update(" Ledger: [dim]---[/dim] ")
+            ledger_text = " Ledger: [dim]---[/] "
+        self.query_one("#ledger-info", Static).update(ledger_text)
 
         # Ledger time
-        time_widget = self.query_one("#ledger-time", Static)
         if self.ledger_time:
-            time_widget.update(f" Close: [dim]{self.ledger_time}[/dim] | Txns: [dim]{self.txn_count}[/dim] ")
+            time_text = f" Close: [dim]{self.ledger_time}[/] | Txns: [dim]{self.txn_count}[/] "
         else:
-            time_widget.update("")
-
-    def on_ledger_closed(self, event: LedgerClosed) -> None:
-        """Handle ledger closed events."""
-        self.current_ledger = event.ledger_index
-        self.txn_count = event.txn_count
-        if event.close_time:
-            self.ledger_time = event.close_time.strftime("%H:%M:%S")
-
-    def on_connection_state_changed(self, event: ConnectionStateChanged) -> None:
-        """Handle connection state changes."""
-        self.connection_status = event.state.lower()
+            time_text = ""
+        self.query_one("#ledger-time", Static).update(time_text)

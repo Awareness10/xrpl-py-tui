@@ -6,106 +6,79 @@ from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Static, DataTable
 
-from messages import TransactionReceived, TransactionValidated, TransactionFailed
 from state.models import TransactionStatus
+from .base import DataWidget
 
 
-class TransactionsWidget(Static):
+class TransactionsWidget(DataWidget):
     """Widget displaying transaction history."""
 
+    DEFAULT_CSS = """
+    TransactionsWidget #transactions-scroll {
+        width: 100%;
+        height: 1fr;
+        padding: 0 1;
+    }
+
+    TransactionsWidget #transactions-table {
+        width: 100%;
+        height: auto;
+    }
+    """
+
     def compose(self) -> ComposeResult:
-        """Compose the widget layout."""
-        yield Static("[bold]Transactions[/bold]", classes="widget-title")
+        yield Static("[bold]Transactions[/]", classes="widget-title")
         yield VerticalScroll(
             DataTable(id="transactions-table"),
             id="transactions-scroll",
         )
 
     def on_mount(self) -> None:
-        """Initialize the transactions table."""
         table = self.query_one("#transactions-table", DataTable)
-        table.add_columns("Status", "Type", "Hash", "Amount", "Ledger")
+        table.add_columns("Status", "Type", "From", "To", "Amount", "Ledger")
         table.cursor_type = "row"
         table.zebra_stripes = True
 
-    def _get_store(self):
-        """Get the state store from the app."""
-        return self.app.store
+    def _format_address(self, address: str, short: str) -> str:
+        """Format address, highlighting own wallets."""
+        if address in self._get_store().wallet_addresses:
+            return f"[#a855f7]{short}[/]"
+        return f"[dim]{short}[/]" if short else "[dim]—[/]"
 
-    def _refresh_table(self) -> None:
-        """Refresh the transactions table with current data."""
+    def _refresh(self) -> None:
+        """Refresh the transactions table."""
         table = self.query_one("#transactions-table", DataTable)
         table.clear()
 
         store = self._get_store()
 
-        # Show pending transactions first
+        # Pending transactions first
         for tx in store.pending_transactions:
-            status_str = "[yellow]⋯ Pending[/yellow]"
-            amount_str = tx.amount.format_xrp(show_drops=False) if tx.amount else "[dim]—[/dim]"
-            ledger_str = "[dim]—[/dim]"
-
             table.add_row(
-                status_str,
+                "[#eab308]⋯[/]",
                 tx.tx_type,
-                tx.short_hash,
-                amount_str,
-                ledger_str,
+                self._format_address(tx.source, tx.short_source),
+                self._format_address(tx.destination, tx.short_destination),
+                tx.amount.format_xrp(show_drops=False) if tx.amount else "[dim]—[/]",
+                "[dim]—[/]",
                 key=tx.tx_hash,
             )
 
-        # Then show recent transactions
-        for tx in store.recent_transactions[:20]:  # Limit display
+        # Recent transactions
+        for tx in store.recent_transactions[:20]:
             if tx.status == TransactionStatus.VALIDATED:
-                status_str = "[green]✓ Valid[/green]"
+                status = "[#22c55e]✓[/]"
             elif tx.status == TransactionStatus.FAILED:
-                status_str = "[red]✗ Failed[/red]"
+                status = "[#ef4444]✗[/]"
             else:
-                status_str = "[yellow]⋯ Pending[/yellow]"
-
-            amount_str = tx.amount.format_xrp(show_drops=False) if tx.amount else "[dim]—[/dim]"
-            ledger_str = str(tx.ledger_index) if tx.ledger_index else "[dim]—[/dim]"
+                status = "[#eab308]⋯[/]"
 
             table.add_row(
-                status_str,
+                status,
                 tx.tx_type,
-                tx.short_hash,
-                amount_str,
-                ledger_str,
+                self._format_address(tx.source, tx.short_source),
+                self._format_address(tx.destination, tx.short_destination),
+                tx.amount.format_xrp(show_drops=False) if tx.amount else "[dim]—[/]",
+                str(tx.ledger_index) if tx.ledger_index else "[dim]—[/]",
                 key=tx.tx_hash,
             )
-
-    def on_transaction_received(self, event: TransactionReceived) -> None:
-        """Handle new transaction events."""
-        store = self._get_store()
-
-        # Check if this transaction involves our accounts
-        tracked = store.account_addresses
-        if event.source not in tracked and event.destination not in tracked:
-            return  # Not our transaction
-
-        # Add to store
-        if event.validated and event.ledger_index:
-            store.add_received_transaction(
-                tx_hash=event.tx_hash,
-                tx_type=event.tx_type,
-                ledger_index=event.ledger_index,
-                amount=event.amount,
-                source=event.source,
-                destination=event.destination,
-                fee=event.fee,
-            )
-
-        self._refresh_table()
-
-    def on_transaction_validated(self, event: TransactionValidated) -> None:
-        """Handle transaction validation events."""
-        store = self._get_store()
-        store.mark_transaction_validated(event.tx_hash, event.ledger_index)
-        self._refresh_table()
-
-    def on_transaction_failed(self, event: TransactionFailed) -> None:
-        """Handle transaction failure events."""
-        store = self._get_store()
-        store.mark_transaction_failed(event.tx_hash, event.error)
-        self._refresh_table()

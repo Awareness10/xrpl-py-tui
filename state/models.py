@@ -107,7 +107,21 @@ class TransactionState:
     @property
     def short_hash(self) -> str:
         """Get shortened hash for display."""
-        return f"{self.tx_hash[:8]}...{self.tx_hash[-8:]}"
+        return f"{self.tx_hash[:8]}..."
+
+    @property
+    def short_source(self) -> str:
+        """Get shortened source address for display."""
+        if not self.source:
+            return ""
+        return f"{self.source[:4]}..{self.source[-4:]}"
+
+    @property
+    def short_destination(self) -> str:
+        """Get shortened destination address for display."""
+        if not self.destination:
+            return ""
+        return f"{self.destination[:4]}..{self.destination[-4:]}"
 
     @property
     def is_validated(self) -> bool:

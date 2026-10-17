@@ -11,8 +11,8 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.reactive import reactive
-from textual.widgets import Header, Footer, Static
-from textual.worker import Worker, get_current_worker
+from textual.widgets import Header, Footer
+from textual.worker import get_current_worker
 
 from xrpl.wallet import Wallet
 from xrpl.asyncio.wallet import generate_faucet_wallet
@@ -21,23 +21,15 @@ from xrpl.asyncio.account import get_balance
 from xrpl.models import Subscribe, StreamParameter, Payment
 from xrpl.asyncio.transaction import submit_and_wait
 
-from xrpl_client import XRPLConnectionManager, ConnectionState
-from xrpl_client.subscriptions import SubscriptionManager
 from state import XRPLStateStore, WalletInfo
 from state.models import WalletSource
-from messages import (
-    LedgerClosed,
-    AccountUpdated,
-    ConnectionStateChanged,
-    TransactionReceived,
-    WalletCreated,
-)
 from utils.xrp_amount import XRP
+from theme import OLED_DARK
 
 from widgets.ledger import LedgerWidget
 from widgets.accounts import AccountsWidget
 from widgets.transactions import TransactionsWidget
-from widgets.modals import WalletImportModal, TransactionModal, FaucetWalletModal
+from widgets.modals import WalletImportModal, TransactionModal
 
 
 class XRPLDashboard(App):
@@ -54,27 +46,21 @@ class XRPLDashboard(App):
         Binding("d", "toggle_dark", "Toggle Dark Mode"),
     ]
 
-    # Reactive attributes for UI updates
+    # Reactive attributes - bound to LedgerWidget via data_bind()
     connection_status = reactive("disconnected")
     current_ledger = reactive(0)
     ledger_time = reactive("")
+    txn_count = reactive(0)
 
     def __init__(self) -> None:
         super().__init__()
         self.store = XRPLStateStore()
-        self.connection = XRPLConnectionManager()
-        self.subscriptions = SubscriptionManager(self.connection)
         self._ws_client: AsyncWebsocketClient | None = None
-        self._ws_lock = asyncio.Lock()  # Protects _ws_client access
+        self._ws_lock = asyncio.Lock()
 
     @asynccontextmanager
     async def _get_client(self) -> AsyncIterator[AsyncWebsocketClient]:
-        """
-        Context manager for safe WebSocket client access.
-
-        Acquires lock and validates client is connected before yielding.
-        Raises RuntimeError if client is not available.
-        """
+        """Context manager for safe WebSocket client access."""
         async with self._ws_lock:
             if self._ws_client is None or not self._ws_client.is_open():
                 raise RuntimeError("Not connected to XRPL")
@@ -84,13 +70,20 @@ class XRPLDashboard(App):
         """Compose the application layout."""
         yield Header()
         yield Container(
+            # Top bar with ledger info
             Horizontal(
-                LedgerWidget(id="ledger-widget"),
+                LedgerWidget().data_bind(
+                    connection_status=XRPLDashboard.connection_status,
+                    current_ledger=XRPLDashboard.current_ledger,
+                    ledger_time=XRPLDashboard.ledger_time,
+                    txn_count=XRPLDashboard.txn_count,
+                ),
                 id="top-bar",
             ),
+            # Main content area
             Horizontal(
-                AccountsWidget(id="accounts-widget"),
-                TransactionsWidget(id="transactions-widget"),
+                Vertical(AccountsWidget(), id="left-panel"),
+                Vertical(TransactionsWidget(), id="right-panel"),
                 id="main-content",
             ),
             id="app-container",
@@ -99,10 +92,10 @@ class XRPLDashboard(App):
 
     async def on_mount(self) -> None:
         """Handle application mount - start WebSocket connection."""
+        self.register_theme(OLED_DARK)
+        self.theme = "oled-dark"
         self.title = "XRPL Dashboard"
         self.sub_title = "Testnet"
-
-        # Start the WebSocket connection worker
         self.run_worker(self._connect_xrpl(), exclusive=True, name="xrpl_connection")
 
     async def _connect_xrpl(self) -> None:
@@ -112,36 +105,26 @@ class XRPLDashboard(App):
         while not worker.is_cancelled:
             try:
                 self.connection_status = "connecting"
-                self.post_message(ConnectionStateChanged("connecting"))
 
                 async with AsyncWebsocketClient(
                     "wss://s.altnet.rippletest.net:51233"
                 ) as client:
-                    # Set client under lock
                     async with self._ws_lock:
                         self._ws_client = client
 
                     self.connection_status = "connected"
-                    self.post_message(ConnectionStateChanged("connected"))
 
-                    # Subscribe to ledger stream
                     await client.send(Subscribe(streams=[StreamParameter.LEDGER]))
 
-                    # Process incoming messages
                     async for message in client:
                         if worker.is_cancelled:
                             break
                         await self._handle_ws_message(message)
 
-            except Exception as e:
+            except Exception:
                 self.connection_status = "reconnecting"
-                self.post_message(
-                    ConnectionStateChanged("reconnecting", error=str(e))
-                )
-                # Wait before reconnecting
                 await asyncio.sleep(2)
             finally:
-                # Clear client under lock
                 async with self._ws_lock:
                     self._ws_client = None
 
@@ -155,26 +138,16 @@ class XRPLDashboard(App):
             txn_count = message.get("txn_count", 0)
             close_time = message.get("ledger_time")
 
-            # Update reactive attributes
+            # Update reactive attributes (data_bind syncs to LedgerWidget)
             self.current_ledger = ledger_index
+            self.txn_count = txn_count
 
-            # Parse close time
             if close_time:
                 ripple_epoch = datetime(2000, 1, 1)
                 dt = datetime.fromtimestamp(ripple_epoch.timestamp() + close_time)
                 self.ledger_time = dt.strftime("%H:%M:%S")
 
-            # Update store
             self.store.update_ledger(ledger_index, ledger_hash, close_time, txn_count)
-
-            # Post message for widgets
-            self.post_message(
-                LedgerClosed(
-                    ledger_index=ledger_index,
-                    ledger_hash=ledger_hash,
-                    txn_count=txn_count,
-                )
-            )
 
         elif msg_type == "transaction":
             await self._handle_transaction_message(message)
@@ -182,13 +155,17 @@ class XRPLDashboard(App):
     async def _handle_transaction_message(self, message: dict[str, Any]) -> None:
         """Handle transaction messages from subscriptions."""
         tx = message.get("transaction", {})
-        meta = message.get("meta", {})
         validated = message.get("validated", False)
 
         tx_hash = tx.get("hash", "")
         tx_type = tx.get("TransactionType", "Unknown")
         source = tx.get("Account", "")
         destination = tx.get("Destination", "")
+
+        # Check if this transaction involves our accounts
+        tracked = self.store.account_addresses
+        if source not in tracked and destination not in tracked:
+            return  # Not our transaction
 
         # Parse amount if Payment
         amount = None
@@ -204,23 +181,21 @@ class XRPLDashboard(App):
 
         ledger_index = message.get("ledger_index")
 
-        self.post_message(
-            TransactionReceived(
+        # Add transaction to store if validated
+        if validated and ledger_index:
+            self.store.add_received_transaction(
                 tx_hash=tx_hash,
                 tx_type=tx_type,
-                validated=validated,
                 ledger_index=ledger_index,
                 amount=amount,
                 source=source,
                 destination=destination,
                 fee=fee,
             )
-        )
 
-        # If transaction involves our accounts, refresh balances
-        tracked = self.store.account_addresses
-        if source in tracked or destination in tracked:
-            await self._refresh_account_balances()
+        # Trigger widget refresh via reactive revision counter
+        self.query_one(TransactionsWidget).revision += 1
+        await self._refresh_account_balances()
 
     async def _refresh_account_balances(self) -> None:
         """Refresh balances for all tracked accounts."""
@@ -230,11 +205,11 @@ class XRPLDashboard(App):
                     try:
                         balance_drops = await get_balance(address, client)
                         balance = XRP.from_drops(int(balance_drops))
-                        prev_balance = self.store.accounts[address].balance if address in self.store.accounts else None
                         self.store.update_account_balance(address, balance)
-                        self.post_message(AccountUpdated(address, balance, prev_balance))
                     except Exception:
                         pass  # Account might not exist yet
+            # Trigger widget refresh via reactive revision counter
+            self.query_one(AccountsWidget).revision += 1
         except RuntimeError:
             pass  # Not connected
 
@@ -268,10 +243,8 @@ class XRPLDashboard(App):
                 balance = XRP.from_drops(int(balance_drops))
                 self.store.update_account_balance(wallet.address, balance)
 
-            # Post messages outside the lock to avoid blocking
-            self.post_message(WalletCreated(wallet.address, "faucet"))
-            self.post_message(AccountUpdated(wallet.address, balance))
             self.notify(f"Wallet created: {wallet.address[:8]}...")
+            self.query_one(AccountsWidget).revision += 1
 
         except RuntimeError as e:
             self.notify(f"Not connected to XRPL: {e}", severity="error")
@@ -305,11 +278,8 @@ class XRPLDashboard(App):
         except Exception:
             pass  # Balance fetch failed, wallet still added
 
-        # Always post messages to update UI
-        self.post_message(WalletCreated(wallet.address, "imported"))
-        if balance is not None:
-            self.post_message(AccountUpdated(wallet.address, balance))
         self.notify(f"Wallet imported: {wallet.address[:8]}...")
+        self.query_one(AccountsWidget).revision += 1
 
     def action_new_transaction(self) -> None:
         """Show new transaction modal."""
@@ -358,9 +328,23 @@ class XRPLDashboard(App):
                 response = await submit_and_wait(payment, client, wallet_info.wallet)
 
                 tx_hash = response.result.get("hash", "")
+                ledger_index = response.result.get("ledger_index")
+                fee = response.result.get("Fee")
+
+                # Add transaction to store
+                self.store.add_received_transaction(
+                    tx_hash=tx_hash,
+                    tx_type="Payment",
+                    ledger_index=ledger_index or 0,
+                    amount=amount,
+                    source=wallet_info.address,
+                    destination=destination,
+                    fee=XRP.from_drops(int(fee)) if fee else None,
+                )
+
                 self.notify(f"Payment validated: {tx_hash[:8]}...", severity="information")
 
-            # Refresh balances outside the lock
+            self.query_one(TransactionsWidget).revision += 1
             await self._refresh_account_balances()
 
         except RuntimeError as e:
@@ -369,8 +353,8 @@ class XRPLDashboard(App):
             self.notify(f"Payment failed: {e}", severity="error")
 
     def action_toggle_dark(self) -> None:
-        """Toggle dark mode."""
-        self.theme = "textual-dark" if self.theme == "textual-light" else "textual-light"
+        """Toggle between OLED dark and light themes."""
+        self.theme = "textual-light" if self.theme == "oled-dark" else "oled-dark"
 
 
 def run() -> None:
