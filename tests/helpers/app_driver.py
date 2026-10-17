@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
-from textual.pilot import Pilot
-from textual.widgets import DataTable
+from rustual.pilot import Pilot
+from rustual.widgets import DataTable
 
 if TYPE_CHECKING:
     from app import XRPLDashboard
@@ -277,7 +277,7 @@ class AppDriver:
         """Get all current notification messages."""
         # Try to get notifications from Toast widgets (if available)
         try:
-            from textual.widgets._toast import Toast
+            from rustual.widgets._toast import Toast
 
             toasts = self.app.query(Toast)
             return [str(toast.renderable) for toast in toasts]

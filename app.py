@@ -7,12 +7,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, AsyncIterator
 
-from textual.app import App, ComposeResult
-from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical
-from textual.reactive import reactive
-from textual.widgets import Header, Footer
-from textual.worker import get_current_worker
+from rustual.app import App, ComposeResult
+from rustual.binding import Binding
+from rustual.containers import Container, Horizontal, Vertical
+from rustual.reactive import reactive
+from rustual.widgets import Header, Footer
+from rustual.worker import get_current_worker
 
 from xrpl.wallet import Wallet
 from xrpl.asyncio.wallet import generate_faucet_wallet

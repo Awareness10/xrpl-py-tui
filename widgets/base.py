@@ -5,9 +5,9 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import TypeVar
 
-from textual.reactive import reactive
-from textual.screen import ModalScreen
-from textual.widgets import Static
+from rustual.reactive import reactive
+from rustual.screen import ModalScreen
+from rustual.widgets import Static
 
 T = TypeVar("T")
 

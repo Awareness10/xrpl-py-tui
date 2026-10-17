@@ -1,6 +1,6 @@
 """Custom OLED-friendly theme for XRPL Dashboard."""
 
-from textual.theme import Theme
+from rustual.theme import Theme
 
 # OLED Dark theme with purple accent
 OLED_DARK = Theme(

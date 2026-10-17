@@ -40,7 +40,7 @@ def step_initiate_payment(context, amount: float):
     context.payment_amount = amount
 
     async def _press():
-        from textual.screen import ModalScreen
+        from rustual.screen import ModalScreen
 
         await context.driver.press_key("t")
         await context.driver.pilot.pause()
@@ -68,7 +68,7 @@ def step_enter_destination(context):
     assert context.destination_address, "No destination address set"
 
     async def _fill_destination():
-        from textual.widgets import Input
+        from rustual.widgets import Input
 
         # Query from the active screen (the modal)
         screen = context.driver.app.screen
@@ -85,7 +85,7 @@ def step_enter_amount(context):
     assert hasattr(context, "payment_amount"), "No payment amount set"
 
     async def _fill_amount():
-        from textual.widgets import Input
+        from rustual.widgets import Input
 
         # Query from the active screen (the modal)
         screen = context.driver.app.screen
@@ -103,8 +103,8 @@ def step_confirm_transaction(context):
     context.pre_tx_count = context.driver.get_transaction_count()
 
     async def _confirm():
-        from textual.widgets import Select, Input
-        from textual.screen import ModalScreen
+        from rustual.widgets import Select, Input
+        from rustual.screen import ModalScreen
 
         # Query from the active screen (the modal)
         screen = context.driver.app.screen
@@ -189,7 +189,7 @@ def step_wait_for_transaction_validated(context):
 @then("the transaction should be submitted")
 def step_check_transaction_submitted(context):
     """Verify the transaction was submitted."""
-    from textual.screen import ModalScreen
+    from rustual.screen import ModalScreen
 
     # After clicking send, the modal should be dismissed if successful
     screen_stack = context.driver.app.screen_stack
@@ -273,7 +273,7 @@ def step_check_warning_notification(context):
     # When no wallets exist, pressing 't' should NOT open the transaction modal
     # and should show a warning notification instead.
     # We verify this by checking that no modal screen is active.
-    from textual.screen import ModalScreen
+    from rustual.screen import ModalScreen
 
     screen_stack = context.driver.app.screen_stack
     modals = [s for s in screen_stack if isinstance(s, ModalScreen)]
@@ -288,7 +288,7 @@ def step_check_warning_notification(context):
 @then("the transaction modal should not open")
 def step_check_modal_not_open(context):
     """Verify the transaction modal did not open."""
-    from textual.screen import ModalScreen
+    from rustual.screen import ModalScreen
 
     # Check there are no modal screens
     screen_stack = context.driver.app.screen_stack

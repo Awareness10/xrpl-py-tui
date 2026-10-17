@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from textual.app import ComposeResult
-from textual.containers import VerticalScroll
-from textual.widgets import Static, DataTable
+from rustual.app import ComposeResult
+from rustual.containers import VerticalScroll
+from rustual.widgets import Static, DataTable
 
 from state.models import TransactionStatus
 from .base import DataWidget

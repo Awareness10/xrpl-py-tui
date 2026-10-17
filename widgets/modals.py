@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from textual.app import ComposeResult
-from textual.containers import Container, Horizontal
-from textual.widgets import Button, Input, Static, Select
-from textual.validation import Function
+from rustual.app import ComposeResult
+from rustual.containers import Container, Horizontal
+from rustual.widgets import Button, Input, Static, Select
+from rustual.validation import Function
 
 from xrpl.wallet import Wallet
 

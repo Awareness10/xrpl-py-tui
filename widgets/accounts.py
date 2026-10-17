@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from textual.app import ComposeResult
-from textual.containers import Container
-from textual.widgets import Static, DataTable
-from textual.binding import Binding
+from rustual.app import ComposeResult
+from rustual.containers import Container
+from rustual.widgets import Static, DataTable
+from rustual.binding import Binding
 
 from state.models import WalletSource
 from .base import DataWidget

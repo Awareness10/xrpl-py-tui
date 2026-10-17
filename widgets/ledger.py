@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from textual.app import ComposeResult
-from textual.containers import Horizontal
-from textual.reactive import reactive
-from textual.widgets import Static
+from rustual.app import ComposeResult
+from rustual.containers import Horizontal
+from rustual.reactive import reactive
+from rustual.widgets import Static
 
 
 class LedgerWidget(Static):
