@@ -18,3 +18,6 @@ test = [
 [tool.behave]
 paths = ["tests/features"]
 format = ["pretty"]
+
+[tool.uv]
+constraint-dependencies = ["certifi>=2026.10.19"]
